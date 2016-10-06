@@ -23,6 +23,11 @@ import org.junit.Test;
 
 public class SimpleMockTest extends CamelTestSupport {
 
+    @Override
+    public boolean isDumpRouteCoverage() {
+        return true;
+    }
+
     @Test
     public void testMock() throws Exception {
         getMockEndpoint("mock:result").expectedBodiesReceived("Hello World");

@@ -25,7 +25,10 @@ import java.util.HashMap;
 import java.util.Hashtable;
 import java.util.Map;
 import java.util.Properties;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import javax.management.MBeanServer;
+import javax.management.ObjectName;
 import javax.naming.Context;
 import javax.naming.InitialContext;
 
@@ -40,10 +43,13 @@ import org.apache.camel.NoSuchEndpointException;
 import org.apache.camel.Predicate;
 import org.apache.camel.Processor;
 import org.apache.camel.ProducerTemplate;
+import org.apache.camel.Route;
 import org.apache.camel.RoutesBuilder;
 import org.apache.camel.Service;
 import org.apache.camel.ServiceStatus;
 import org.apache.camel.api.management.mbean.ManagedCamelContextMBean;
+import org.apache.camel.api.management.mbean.ManagedProcessMBean;
+import org.apache.camel.api.management.mbean.ManagedRouteMBean;
 import org.apache.camel.builder.AdviceWithRouteBuilder;
 import org.apache.camel.builder.RouteBuilder;
 import org.apache.camel.component.mock.MockEndpoint;
@@ -387,10 +393,48 @@ public abstract class CamelTestSupport extends TestSupport {
                 String xml = managedCamelContext.dumpRoutesCoverageAsXml();
                 String combined = "<camelRouteCoverage>\n" + gatherTestDetailsAsXml() + xml + "\n</camelRouteCoverage>";
 
+
+
                 File file = new File(dir);
                 // ensure dir exists
                 file.mkdirs();
                 file = new File(dir, name);
+
+                // gather summary of number of routes and whether any routes was missing
+                long total = managedCamelContext.getExchangesTotal();
+
+                StringBuffer sb = new StringBuffer();
+                sb.append("Coverage Summary\n");
+                sb.append("\tCamelContext: ").append(managedCamelContext.getCamelId()).append(" Total: ").append(total).append("\n");
+
+                // loop routes and get their total counter
+                for (Route route : context.getRoutes()) {
+                    String id = route.getId();
+                    ManagedRouteMBean managedRoute = context.getManagedRoute(id, ManagedRouteMBean.class);
+                    Long routeTotal = managedRoute.getExchangesTotal();
+                    int routePercentage = Math.round(total / routeTotal * 100);
+                    sb.append("\tRoute: ").append(id).append(" Total: ").append(routeTotal).append(" Percentage: ").append(routePercentage).append("%\n");
+                    // find all the processors
+
+                    MBeanServer server = context.getManagementStrategy().getManagementAgent().getMBeanServer();
+                    if (server != null) {
+                        String domain = context.getManagementStrategy().getManagementAgent().getMBeanServerDefaultDomain();
+                        ObjectName on = new ObjectName(domain + ":context=" + context.getManagementName() + ",type=processors,name=*");
+                        Set<ObjectName> names = server.queryNames(on, null);
+                        for (ObjectName o : names) {
+                            String pName = o.getKeyProperty("name");
+                            pName = ObjectName.unquote(pName);
+                            ManagedProcessMBean managedProcessor = context.getManagedProcessor(pName, ManagedProcessMBean.class);
+                            if (managedProcessor != null) {
+                                String pid = managedProcessor.getProcessorId();
+                                Long pTotal = managedProcessor.getExchangesTotal();
+                                int pPercentage = Math.round(total / pTotal * 100);
+                                sb.append("\tProcessor: ").append(pid).append(" Total: ").append(pTotal).append(" Percentage: ").append(pPercentage).append("%\n");
+                            }
+                        }
+                    }
+                }
+                log.info(sb.toString());
 
                 log.info("Dumping route coverage to file: " + file);
                 InputStream is = new ByteArrayInputStream(combined.getBytes());
